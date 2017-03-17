@@ -130,6 +130,15 @@ dd <- ddply(d, ~bin+type, function(x){
 head(dd)
 ```
 
+Plot of normalized biomass. Not sure how to get this to look linear.
+```{r}
+dd$norm_biomass <- dd$biomass_ugC / dd$bin_length
+plot(density(dd$norm_biomass))
+```
+
+```{r}
+plot(density(log10(dd$norm_biomass)))
+```
 
 Notes on R Notebooks
 --
