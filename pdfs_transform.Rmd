@@ -8,25 +8,131 @@ Using a R Markdown Notebook to explore the transformation of plankton probabilit
 Sample data: Luo et al. unpublished. Phytoplankton and zooplankton individual lengths from an in-situ imaging system. Data subsetted from original.
 
 ```{r}
-# set working directory
-setwd("/Users/jluo/Documents/NCAR/models/plankton-pdf")
+# libraries
+library(ggplot2)
+library(plyr)
 
+# set working directory
+# setwd("/Users/jluo/Documents/NCAR/models/plankton-pdf")
+
+# functions for geometric mean and sd
+gm_mean = function(x, na.rm=TRUE, na.exclude=FALSE){
+  if(na.exclude){
+    x <- x[which(!is.na(x))]
+    x <- x[x>0]
+    res <- exp(mean(log(x), na.rm=na.rm))
+    return(res)
+  } else {
+    x <- x[x>0]
+    res <- exp(mean(log(x), na.rm=na.rm))
+    return(res)
+  }
+}
+
+gm_sd <- function(x, na.rm = TRUE, ...)
+{
+  exp(sd(log(x, ...), na.rm = na.rm, ...))
+}
+
+
+```
+
+```{r}
 d <- read.table("data/phyto_zoo_lengths_subset.txt", sep = "", header=TRUE)
+d <- d[which(d$len_px > 0),]
 
 d$type <- ifelse(d$type==1, "phyto", "zoo")
 d$len_mm <- d$len_px / 15.1704
 
 print(str(d))
-print(head(d))
+print(head(d, 3))
 ```
+
 
 ```{r}
 plot(density(d$len_mm), main = "PDF of plankton size distributions", xlab="Organism lengths (mm), N = 302585")
 ```
 
+Organism lengths are then converted to biomass according to a general allometric relationship from Rodriguez and Mullin (1986):
+log Biomass = 2.23 log ESD - 5.58
+
 ```{r}
-plot(density(log10(d$len_mm)))
+len_ug <- d$len_mm * 1000
+B_ug <- 2.23 * log10(len_ug) - 5.58 
+
+d$biomass_ugC <- B_ug #/ 1000
+
+# lengths under 0.318 mm result in a negative biomass, exclude those from this analysis
+d <- d[d$len_mm >= 0.318,]
+
+plot(density(d$biomass_ugC))
 ```
+
+Convert biomass to a normalized biomass spectrum. Patt and Denman (1977) proposed the "normalized biomass spectrum (NBS)" in which biomass concentration per size interval is divided by the linear width of the interval and displayed on a logarithmic ordinate.
+
+Conversion using equal bins on a log-scale:
+```{r}
+log_biomass <- sort(unique(log10(d$biomass_ugC)))
+# add the last element to ensure the breaks do not get cut off
+log_biomass <- c(log_biomass, round(max(log_biomass), 2) + 0.01) 
+
+
+# create the levels
+log_cuts = data.frame(levels=levels(cut(log_biomass, breaks = 100)))
+
+
+# parse the levels into min and max
+# replace every punctuation mark except [,.-] by an empty string
+min_max <- unlist(strsplit(gsub("(?![,.-])[[:punct:]]", "", 
+           as.character(log_cuts$levels), perl=TRUE), ","))
+log_cuts$log_min <- as.numeric(min_max[seq(1, length(min_max), by=2)])
+log_cuts$log_max <- as.numeric(min_max[seq(2, length(min_max), by=2)])
+
+log_cuts$min <- 10^(log_cuts$log_min)
+log_cuts$max <- 10^(log_cuts$log_max)
+```
+
+```{r}
+print(head(log_cuts, 3))
+print(tail(log_cuts, 3))
+```
+ 
+```{r}
+breaks <- c(log_cuts$min[1], log_cuts$max)
+
+d$bin <- cut(d$biomass_ugC, breaks=breaks) # factor
+
+# calculate the linear length of each bin
+min_max <- unlist(strsplit(gsub("(?![,.-])[[:punct:]]", "", 
+           as.character(levels(d$bin)), perl=TRUE), ","))
+min <- as.numeric(min_max[seq(1, length(min_max), by=2)])
+max <- as.numeric(min_max[seq(2, length(min_max), by=2)])
+
+bin_lengths <- max - min
+
+ggplot(data=data.frame(bin_lengths=bin_lengths, n=1:length(bin_lengths))) + geom_line(aes(y=bin_lengths, x=n)) + labs(title="Bin Lengths")
+```
+
+```{r}
+# assign bin lengths to bins
+d$bin_lengths <- bin_lengths[as.numeric(d$bin)]
+
+# collect bins together, calculate a mean biomass per bin and divide by the width of the interval
+dd <- ddply(d, ~bin+type, function(x){
+  len_px <- gm_mean(x$len_px)
+  len_mm <- gm_mean(x$len_px)
+  biomass_ugC <- gm_mean(x$biomass_ugC)
+  n <- nrow(x)
+  
+  return(data.frame(n, len_px, len_mm, biomass_ugC, bin_length=unique(x$bin_length)))
+})
+
+head(dd)
+```
+
+
+Notes on R Notebooks
+--
 
 Add a new chunk by clicking the *Insert Chunk* button on the toolbar or by pressing *Cmd+Option+I*.
 
