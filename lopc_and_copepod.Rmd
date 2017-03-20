@@ -1,0 +1,86 @@
+---
+title: "Copepod and LOPC data"
+output: html_notebook
+---
+
+
+```{r}
+library(ggplot2)
+library(plyr)
+library(stringr)
+library(reshape2)
+
+`%ni%` = Negate(`%in%`)
+
+# set working directory
+setwd("/Users/jluo/Documents/NCAR/models/plankton-pdf")
+```
+
+```{r}
+# load data
+metadata <- read.table("data/Stamieszkin/Copepods_GOMmeta.csv", sep=",")
+conc <- read.table("data/Stamieszkin/Copepods_conc.csv", sep=",")
+lengths <- read.table("data/Stamieszkin/Copepods_lengths.csv", sep=",")
+
+names(metadata) <- c("year", "month", "day", "hour", "min", "lat", "lon")
+names(conc) <- names(lengths) <- str_c("cope_", seq_len(ncol(conc)))
+
+head(lengths)
+head(conc)
+```
+
+```{r}
+# add a sample number
+metadata$sample <- seq_len(nrow(metadata))
+conc$sample <- seq_len(nrow(conc))
+lengths$sample <- seq_len(nrow(lengths))
+
+# convert the metadata date into POSIX form
+metadata$dateTime <- str_c(as.character(metadata$year), "-", sprintf("%02d", metadata$month), "-", sprintf("%02d", metadata$day), 
+                              " ", sprintf("%02d", metadata$hour), ":", sprintf("%02d", metadata$min))
+metadata$dateTime <- as.POSIXct(strptime(metadata$dateTime, format="%Y-%m-%d %H:%M"), tz="UTC")
+
+metadata <- metadata[,c("year", "month", "day", "hour", "min", "dateTime", "lat", "lon", "sample")]
+head(metadata)
+```
+
+```{r}
+# collapse data
+concM <- melt(conc, id.vars = "sample", variable.name = "taxon", value.name = "concentration_m3")
+lenM <- melt(lengths, id.vars="sample", variable.name = "taxon", value.name = "length_um")
+
+# join data together into a single data frame
+d <- join(metadata[,c("sample", "dateTime", "lat", "lon")], concM, by="sample")
+d <- join(d, lenM, by=c("sample", "taxon"))
+
+head(d)
+```
+
+```{r}
+# load LOPC data
+opc_bins <- read.table("data/LOPC/LOPCbins.txt") # in meters
+opc_data <- read.table("data/LOPC/LOPCdata.txt", sep=",")
+
+names(opc_bins)[1] <- "bin_size"
+opc_bins$bins <- str_c("bin_", 1:81)
+
+names(opc_data) <- c("year", "mon", "day", "x1", "x2", "lat", "lon", str_c("bin_", 1:81))
+opc_data <- opc_data[,which(names(opc_data) %ni% c("x1", "x2"))]
+head(opc_data)
+```
+
+```{r}
+opc_dataM <- melt(opc_data, id.vars = c("year", "mon", "day", "lat", "lon"), variable.name = "bins", value.name = "counts_m3")
+opc_d <- join(opc_dataM, opc_bins, by="bins")
+
+opc_d$date <- str_c(as.character(opc_d$year), "-", sprintf("%02d", opc_d$mon), "-", sprintf("%02d", opc_d$day))
+head(opc_d)
+```
+
+```{r}
+ggplot(opc_d[opc_d$counts_m3 != 0,]) + geom_point(aes(x=log(bin_size), y=log(counts_m3), colour=date), size=1)
+```
+
+```{r}
+ggplot(opc_d[opc_d$counts_m3 != 0,]) + geom_point(aes(x=log(bin_size), y=log(counts_m3/bin_size), colour=date), size=1) + ggtitle("normalized data")
+```
