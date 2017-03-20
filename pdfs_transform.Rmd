@@ -72,13 +72,13 @@ Convert biomass to a normalized biomass spectrum. Patt and Denman (1977) propose
 
 Convert to equal bins on a log-scale (thus, bins should be exponentially increasing in size on a non-log scale)
 ```{r}
-log_biomass <- sort(unique(log10(d$biomass_ugC)))
+log_biomass <- sort(unique(log2(d$biomass_ugC)))
 # add the last element to ensure the breaks do not get cut off
 log_biomass <- c(log_biomass, round(max(log_biomass), 2) + 0.01) 
 
 
 # create the levels
-log_cuts = data.frame(levels=levels(cut(log_biomass, breaks = 100)))
+log_cuts = data.frame(levels=levels(cut(log_biomass, breaks = 20))) #breaks=6
 
 
 # parse the levels into min and max
@@ -88,8 +88,8 @@ min_max <- unlist(strsplit(gsub("(?![,.-])[[:punct:]]", "",
 log_cuts$log_min <- as.numeric(min_max[seq(1, length(min_max), by=2)])
 log_cuts$log_max <- as.numeric(min_max[seq(2, length(min_max), by=2)])
 
-log_cuts$min <- 10^(log_cuts$log_min)
-log_cuts$max <- 10^(log_cuts$log_max)
+log_cuts$min <- 2^(log_cuts$log_min)
+log_cuts$max <- 2^(log_cuts$log_max)
 ```
 
 ```{r}
@@ -109,6 +109,7 @@ min <- as.numeric(min_max[seq(1, length(min_max), by=2)])
 max <- as.numeric(min_max[seq(2, length(min_max), by=2)])
 
 bin_lengths <- max - min
+bin_meanwt <- apply(cbind(min, max), 1, gm_mean)
 
 ggplot(data=data.frame(bin_lengths=bin_lengths, n=1:length(bin_lengths))) + geom_line(aes(y=bin_lengths, x=n)) + 
   labs(title="Size of bins (increasing due to log transformation)", xlab="Size of bins (ug C)", ylab="sequential bin number")
@@ -119,15 +120,18 @@ Binning the data into size bins
 ```{r}
 # assign bin lengths to bins
 d$bin_lengths <- bin_lengths[as.numeric(d$bin)]
+d$bin_meanwt <- bin_meanwt[as.numeric(d$bin)]
 
-# collect bins together, calculate a mean biomass per bin and divide by the width of the interval
+# collect bins together, calculate a mean/sum biomass per bin and divide by the width of the interval
 dd <- ddply(d, ~bin+type, function(x){
   len_px <- gm_mean(x$len_px)
   len_mm <- gm_mean(x$len_px)
-  biomass_ugC <- gm_mean(x$biomass_ugC)
+  biomass_ugC_mean <- gm_mean(x$biomass_ugC)
+  biomass_ugC_sum <- sum(x$biomass_ugC)
   n <- nrow(x)
   
-  return(data.frame(n, len_px, len_mm, biomass_ugC, bin_length=unique(x$bin_length)))
+  return(data.frame(n, len_px, len_mm, biomass_ugC_mean, biomass_ugC_sum, 
+                    bin_length = unique(x$bin_length), bin_meanwt = unique(x$bin_meanwt)))
 })
 
 head(dd)
@@ -137,7 +141,7 @@ head(dd)
 Plot of normalized biomass. **_The problem is that I am not sure how to get this PDF to be linear._**
 
 ```{r}
-dd$norm_biomass <- dd$biomass_ugC / dd$bin_length
+dd$norm_biomass <- dd$biomass_ugC_sum / dd$bin_meanwt
 plot(density(dd$norm_biomass), main="PDF of normalized biomass", xlab="Normalized biomass")
 ```
 
@@ -145,6 +149,33 @@ The log-normalized biomass is also not linear.
 
 ```{r}
 plot(density(log10(dd$norm_biomass)), main="PDF of Log-normalized Biomass", xlab="Log normalized biomass")
+```
+
+```{r}
+ggplot(dd) + geom_point(aes(x=log10(dd$bin_meanwt), y=log10(dd$biomass_ugC_sum), colour=type))
+```
+
+```{r}
+# check
+print(bin_lengths / bin_meanwt)
+plot(bin_lengths~bin_meanwt)
+```
+
+Reverse Engineering the particle size distribution
+========
+
+```{r}
+log_x <- seq(from = -5,to = 10, 1) #log bins
+x <- 2^log_x 
+
+log_norm_biomass = -log_x
+plot(log_norm_biomass ~ log_x, type="l")
+```
+
+```{r}
+norm_biomass = 2^(log_norm_biomass * x)
+
+plot(norm_biomass ~ x, type="l")
 ```
 
 ***
